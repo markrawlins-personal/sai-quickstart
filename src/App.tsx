@@ -94,7 +94,7 @@ function App() {
   const [timerDurationSeconds, setTimerDurationSeconds] = useState(300)
   const [timerRemainingSeconds, setTimerRemainingSeconds] = useState(300)
   const [timerPaused, setTimerPaused] = useState(false)
-  const [timerLabel, setTimerLabel] = useState('STUDY')
+  const [timerLabel, _setTimerLabel] = useState('STUDY')
   const timerIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const [timerWidgetLeft, setTimerWidgetLeft] = useState<number | null>(null)
   const [timerWidgetTop, setTimerWidgetTop] = useState<number | null>(null)
@@ -206,7 +206,6 @@ function App() {
 
   const COMPOSER_EXIT_MS = 280
   const TYPING_MS_PER_CHAR = 28
-  const POWERUP_PANEL_MIN = 380
 
   const agentIntroMessages = useMemo(() => [
     `I see you have a ${testPrepClass ?? 'German'} vocabulary test this Friday — let's make sure you're ready! 🎯`,
