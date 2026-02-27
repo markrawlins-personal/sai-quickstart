@@ -523,6 +523,40 @@
   transition: opacity 0.3s ease;
 }
 
+/* Reusable token circle / liquid blob – uses --color-accent (#2869DD), animatable */
+.token-circle {
+  display: inline-block;
+  flex-shrink: 0;
+  vertical-align: middle;
+}
+
+.token-circle--above-greeting {
+  display: block;
+  margin-left: auto;
+  margin-right: auto;
+  margin-top: -24px;
+  margin-bottom: var(--spacing-4);
+  animation: greeting-enter 0.6s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  opacity: 0;
+}
+
+/* Blob below Speak button in test-prep chat (side panel + middle panel) */
+.test-prep-chat-blob-wrap {
+  display: flex;
+  justify-content: flex-start;
+  margin-top: 0;
+  margin-bottom: 8px;
+  opacity: 0;
+  transition: opacity 0.4s ease;
+  flex-shrink: 0;
+}
+.test-prep-chat-blob-wrap--animate {
+  opacity: 1;
+}
+.token-circle--below-actions {
+  display: block;
+}
+
 @keyframes greeting-enter {
   from {
     opacity: 0;
@@ -1045,6 +1079,32 @@
   background: var(--color-surface-default);
 }
 
+/* Panel/Middle: header over center only, panels extend to top */
+.test-prep-layout--with-panel {
+  flex-direction: row;
+  align-items: stretch;
+}
+
+.test-prep-layout-center {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+}
+
+.test-prep-chat-header--centered {
+  flex-shrink: 0;
+}
+
+.test-prep-panel-full-height {
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+}
+
 /* Full-width header: Accessibility, Language, New, Menu – same position as before */
 .test-prep-chat-header--full {
   flex-shrink: 0;
@@ -1095,7 +1155,7 @@
 .test-prep-flashcard-center-body .test-prep-flashcard-scroll {
   padding-left: 80px;
   padding-right: 80px;
-  overflow-x: visible;
+  overflow-x: hidden;
 }
 
 .test-prep-chat-sidebar {
@@ -1137,6 +1197,40 @@
 .test-prep-chat-sidebar .test-prep-chat-messages,
 .test-prep-chat-sidebar .test-prep-composer-wrap {
   background: var(--color-surface-elevated);
+}
+
+.test-prep-chat-sidebar .test-prep-composer {
+  background: var(--color-surface-default);
+}
+
+.test-prep-chat-sidebar .test-prep-chat-messages {
+  position: relative;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding-top: 0;
+}
+
+.test-prep-chat-sidebar .test-prep-chat-messages::before {
+  content: '';
+  position: sticky;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 56px;
+  margin-bottom: -56px;
+  background: linear-gradient(
+    to bottom,
+    var(--color-surface-elevated) 0%,
+    var(--color-surface-elevated) 12%,
+    transparent 65%
+  );
+  pointer-events: none;
+  z-index: 1;
+  display: block;
+  flex-shrink: 0;
+  transform: translateZ(0);
+  -webkit-backface-visibility: hidden;
 }
 
 .test-prep-flashcard-sidebar {
@@ -1189,12 +1283,12 @@
 .test-prep-flashcard-tab-bar {
   position: absolute;
   bottom: 16px;
-  left: calc(var(--spacing-60) + 16px);
+  left: calc(var(--spacing-60) + 8px);
   z-index: 40;
   display: flex;
   align-items: stretch;
   background: var(--color-surface-elevated);
-  border: 1px solid var(--color-stroke-strong);
+  border: none;
   border-radius: 20px;
   padding: 3px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);

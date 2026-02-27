@@ -1,5 +1,6 @@
 import { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback } from 'react'
 import { motion } from 'motion/react'
+import { createPongLoader } from './pongLoader'
 import './App.css'
 
 const suggestionButtons = [
@@ -48,6 +49,207 @@ const GERMAN_FLASHCARDS: FlashcardItem[] = [
   { term: 'Sprechen Sie Englisch?', phonetic: 'shprekh-en zee eng-lish', definition: 'Do you speak English?', definitionNote: '' },
 ]
 
+// ── Liquid blob constants and helpers ──────────────────────
+const BLOB_N = 256
+const BLOB_CX = 50
+const BLOB_CY = 50
+const BLOB_BASE_R = 34
+const BLOB_CTRL = 5
+const BLOB_MAX_DROPS = 30
+
+function makeBlobOscillators(amp: number) {
+  return Array.from({ length: BLOB_CTRL }, () => ({
+    phase: Math.random() * Math.PI * 2,
+    speed: 2.0 + Math.random() * 2.0,
+    amp: amp * (0.7 + Math.random() * 0.6),
+  }))
+}
+
+function getBlobRadii(oscs: ReturnType<typeof makeBlobOscillators>, time: number) {
+  return oscs.map((o) => BLOB_BASE_R + o.amp * Math.sin(o.speed * time + o.phase))
+}
+
+function expandBlobRadii(radii: number[]) {
+  return Array.from({ length: BLOB_N }, (_, i) => {
+    const pos = (i / BLOB_N) * BLOB_CTRL
+    const i0 = Math.floor(pos) % BLOB_CTRL
+    const i1 = (i0 + 1) % BLOB_CTRL
+    const f = pos - Math.floor(pos)
+    const sm = (1 - Math.cos(f * Math.PI)) / 2
+    return radii[i0] * (1 - sm) + radii[i1] * sm
+  })
+}
+
+function blobToPath(pts: [number, number][]) {
+  const n = pts.length
+  let d = `M ${pts[0][0].toFixed(2)},${pts[0][1].toFixed(2)}`
+  for (let i = 0; i < n; i++) {
+    const p0 = pts[(i - 1 + n) % n]
+    const p1 = pts[i]
+    const p2 = pts[(i + 1) % n]
+    const p3 = pts[(i + 2) % n]
+    const c1x = p1[0] + (p2[0] - p0[0]) / 6
+    const c1y = p1[1] + (p2[1] - p0[1]) / 6
+    const c2x = p2[0] - (p3[0] - p1[0]) / 6
+    const c2y = p2[1] - (p3[1] - p1[1]) / 6
+    d += ` C ${c1x.toFixed(2)},${c1y.toFixed(2)} ${c2x.toFixed(2)},${c2y.toFixed(2)} ${p2[0].toFixed(2)},${p2[1].toFixed(2)}`
+  }
+  return d + ' Z'
+}
+
+interface BlobDrop {
+  active: boolean
+  x: number
+  y: number
+  vx: number
+  vy: number
+  r: number
+  life: number
+}
+
+function TokenBlob({
+  className,
+  size = 96,
+  mode = 'idle',
+}: {
+  className?: string
+  size?: number
+  mode?: 'idle' | 'thinking'
+}) {
+  const pathRef = useRef<SVGPathElement>(null)
+  const circleRefs = useRef<(SVGCircleElement | null)[]>([])
+  const idleOsc = useMemo(() => makeBlobOscillators(2.5), [])
+  const thinkOsc = useMemo(() => makeBlobOscillators(10), [])
+  const drops = useRef<BlobDrop[]>(
+    Array.from({ length: BLOB_MAX_DROPS }, () => ({ active: false, x: 0, y: 0, vx: 0, vy: 0, r: 0, life: 0 }))
+  ).current
+  const t = useRef(0)
+  const blendedR = useRef<number[]>(Array(BLOB_CTRL).fill(BLOB_BASE_R))
+  const spawnTimer = useRef(0)
+
+  const spawnDrop = useCallback((pts: [number, number][]) => {
+    const i = Math.floor(Math.random() * BLOB_N)
+    const px = pts[i][0]
+    const py = pts[i][1]
+    const nx = px - BLOB_CX
+    const ny = py - BLOB_CY
+    const len = Math.sqrt(nx * nx + ny * ny) || 1
+    const speed = 0.3 + Math.random() * 0.35
+    const spread = (Math.random() - 0.5) * 0.3
+    const slot = drops.find((d) => !d.active)
+    if (!slot) return
+    slot.active = true
+    const inset = 0.85
+    slot.x = BLOB_CX + (px - BLOB_CX) * inset
+    slot.y = BLOB_CY + (py - BLOB_CY) * inset
+    slot.vx = (nx / len) * speed + spread
+    slot.vy = (ny / len) * speed + spread
+    slot.r = 2.5 + Math.random() * 3.5
+    slot.life = 1.0
+  }, [drops])
+
+  useEffect(() => {
+    let raf = 0
+    const circles = circleRefs.current
+    const pathEl = pathRef.current
+    if (!pathEl || circles.length === 0) return
+
+    function tickDroplets() {
+      drops.forEach((d) => {
+        if (!d.active) return
+        d.x += d.vx
+        d.y += d.vy
+        d.vx *= 0.995
+        d.vy *= 0.995
+        d.life -= 0.004
+        if (d.life <= 0) d.active = false
+      })
+    }
+
+    function animate() {
+      t.current += 0.016
+      const isThinking = mode === 'thinking'
+      const activeOsc = isThinking ? thinkOsc : idleOsc
+      const targetR = getBlobRadii(activeOsc, t.current)
+      const blended = blendedR.current
+      for (let i = 0; i < BLOB_CTRL; i++) blended[i] += (targetR[i] - blended[i]) * 0.04
+      const radii = expandBlobRadii(blended)
+      const pts: [number, number][] = radii.map((r, i) => {
+        const a = (i / BLOB_N) * Math.PI * 2
+        return [BLOB_CX + r * Math.cos(a), BLOB_CY + r * Math.sin(a)]
+      })
+
+      if (isThinking) {
+        spawnTimer.current--
+        if (spawnTimer.current <= 0) {
+          spawnDrop(pts)
+          spawnTimer.current = 25 + Math.floor(Math.random() * 20)
+        }
+      }
+      tickDroplets()
+
+      if (pathEl) pathEl.setAttribute('d', blobToPath(pts))
+      drops.forEach((d, i) => {
+        const c = circles[i]
+        if (c && d.active) {
+          c.setAttribute('cx', d.x.toFixed(2))
+          c.setAttribute('cy', d.y.toFixed(2))
+          c.setAttribute('r', (d.r * d.life).toFixed(2))
+          c.setAttribute('opacity', d.life.toFixed(2))
+        } else if (c) {
+          c.setAttribute('r', '0')
+        }
+      })
+      raf = requestAnimationFrame(animate)
+    }
+    raf = requestAnimationFrame(animate)
+    return () => cancelAnimationFrame(raf)
+  }, [mode, idleOsc, thinkOsc, spawnDrop, drops])
+
+  return (
+    <svg
+      className={className}
+      width={size}
+      height={size}
+      viewBox="-20 -20 140 140"
+      overflow="visible"
+      aria-hidden="true"
+    >
+      <g>
+        {Array.from({ length: BLOB_MAX_DROPS }, (_, i) => (
+          <circle
+            key={i}
+            ref={(el) => { circleRefs.current[i] = el }}
+            fill="var(--color-accent)"
+            r="0"
+          />
+        ))}
+      </g>
+      <path ref={pathRef} fill="var(--color-accent)" />
+    </svg>
+  )
+}
+
+// #2869DD in 0–1 RGB for WebGL pong
+const PONG_ACCENT_COLOR: [number, number, number] = [40 / 255, 105 / 255, 221 / 255]
+
+function PongBlob({ className, size = 256 }: { className?: string; size?: number }) {
+  const containerRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    const loader = createPongLoader(el, {
+      size,
+      color: PONG_ACCENT_COLOR,
+      speed: 1.0,
+    })
+    return () => loader.destroy()
+  }, [size])
+
+  return <div ref={containerRef} className={className} aria-hidden="true" />
+}
+
 function App() {
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [composerOpen, setComposerOpen] = useState(false)
@@ -92,6 +294,7 @@ function App() {
   const [agentTypingIndex, setAgentTypingIndex] = useState(0)
   const [agentTypingLength, setAgentTypingLength] = useState(0)
   const [testPrepReplyInput, setTestPrepReplyInput] = useState('')
+  const [testPrepUserMessages, setTestPrepUserMessages] = useState<string[]>([])
   const [timerWidgetOpen, setTimerWidgetOpen] = useState(false)
   const [timerDurationSeconds, setTimerDurationSeconds] = useState(300)
   const [timerRemainingSeconds, setTimerRemainingSeconds] = useState(300)
@@ -313,13 +516,14 @@ function App() {
   const handleTestPrepReplySubmit = useCallback(() => {
     const trimmed = testPrepReplyInput.trim()
     if (!trimmed) return
+    setTestPrepUserMessages((prev) => [...prev, trimmed])
+    setTestPrepReplyInput('')
     if (/timer/i.test(trimmed)) {
       const duration = parseTimerDuration(trimmed)
       setTimerDurationSeconds(duration)
       setTimerRemainingSeconds(duration)
       setTimerPaused(false)
       setTimerWidgetOpen(true)
-      setTestPrepReplyInput('')
     }
   }, [testPrepReplyInput, parseTimerDuration])
 
@@ -713,7 +917,239 @@ function App() {
 
           {/* Main content */}
           {view === 'test-prep-chat' ? (
-            <main className="main-content test-prep-layout">
+            <main
+              className={`main-content test-prep-layout ${(powerUpAsSidebar || powerUpViewMode === 'middle') && powerUpPanelOpen ? 'test-prep-layout--with-panel' : ''}`}
+            >
+              {(powerUpAsSidebar || powerUpViewMode === 'middle') && powerUpPanelOpen ? (
+                <>
+                  <div className="test-prep-layout-center" ref={testPrepContentRef}>
+                    <header className="test-prep-chat-header test-prep-chat-header--full test-prep-chat-header--centered">
+                      <span className="test-prep-chat-title">
+                        <span className="test-prep-chat-flag" aria-hidden="true">🇩🇪</span>
+                        Prüfung Flashcards
+                      </span>
+                      <div className="test-prep-chat-header-toolbar">
+                        {toolbarButtons}
+                      </div>
+                    </header>
+                    <div className="test-prep-chat-content-wrap">
+                      {powerUpViewMode === 'middle' ? (
+                        <div className="test-prep-flashcard-center">
+                          <div className="test-prep-flashcard-body test-prep-flashcard-center-body">
+                            <div className="test-prep-flashcard-scroll">
+                              <div className="test-prep-flashcard-hero">
+                                <img src="/assets/BrandenburgGate.jpg" alt="Brandenburg Gate, Berlin" className="test-prep-flashcard-hero-img" />
+                              </div>
+                              <div className="test-prep-flashcard-progress">
+                                <div className="test-prep-flashcard-progress-left">
+                                  <div className="test-prep-flashcard-progress-ring" aria-hidden="true">
+                                    <svg width="24" height="24" viewBox="0 0 24 24" className="test-prep-progress-ring-svg">
+                                      <circle className="test-prep-progress-ring-track" cx="12" cy="12" r="10" fill="none" strokeWidth="2.5" />
+                                      <circle className="test-prep-progress-ring-fill" cx="12" cy="12" r="10" fill="none" strokeWidth="2.5" strokeDasharray={`${(testPrepCurrentCard / testPrepTotalCards) * 62.83} 62.83`} strokeLinecap="round" transform="rotate(-90 12 12)" />
+                                    </svg>
+                                  </div>
+                                  <span className="test-prep-flashcard-progress-text">{testPrepCurrentCard} of {testPrepTotalCards} cards</span>
+                                </div>
+                                <span className="test-prep-flashcard-progress-known">{Math.round((testPrepKnownCount / testPrepTotalCards) * 100)}% answers known</span>
+                              </div>
+                              <motion.div className={`test-prep-flashcard-card ${flashcardFlipped ? 'test-prep-flashcard-card--flipped' : ''}`} animate={{ x: flashcardExitDirection === 'left' ? '-130%' : flashcardExitDirection === 'right' ? '130%' : 0, y: flashcardExitDirection ? -20 : 0, rotate: flashcardExitDirection === 'left' ? -48 : flashcardExitDirection === 'right' ? 48 : 0, scale: flashcardExitDirection ? 0.82 : 1, opacity: flashcardExitDirection ? 0.2 : 1 }} transition={{ type: 'spring', stiffness: 320, damping: 26 }} onAnimationComplete={() => { if (flashcardExitDirection === 'left') { setTestPrepCurrentCard((c) => Math.min(testPrepTotalCards, c + 1)); setFlashcardFlipped(false); setFlashcardExitDirection(null); } else if (flashcardExitDirection === 'right') { setTestPrepCurrentCard((c) => Math.min(testPrepTotalCards, c + 1)); setTestPrepKnownCount((k) => Math.min(testPrepTotalCards, k + 1)); setFlashcardFlipped(false); setFlashcardExitDirection(null); } }} style={{ pointerEvents: flashcardExitDirection ? 'none' : undefined }}>
+                                <div className="test-prep-flashcard-inner">
+                                  <div className="test-prep-flashcard-front">
+                                    <div className="test-prep-flashcard-card-actions"><button type="button" className="suggestion-btn test-prep-listen-btn"><img src="/assets/Audio.svg" alt="" className="test-prep-action-icon" width={16} height={16} /> Listen</button></div>
+                                    <div className="test-prep-flashcard-content"><p className="test-prep-flashcard-term">{testPrepCurrentCardData.term}</p><p className="test-prep-flashcard-phonetic">{testPrepCurrentCardData.phonetic}</p></div>
+                                    <button type="button" className="suggestion-btn test-prep-flip-btn" onClick={() => setFlashcardFlipped(true)}><img src="/assets/Flip.svg" alt="" className="test-prep-action-icon" width={16} height={16} /> Flip card</button>
+                                  </div>
+                                  <div className="test-prep-flashcard-back">
+                                    <div className="test-prep-flashcard-content test-prep-flashcard-back-content"><p className="test-prep-flashcard-term">{testPrepCurrentCardData.definition}</p>{testPrepCurrentCardData.definitionNote && <p className="test-prep-flashcard-phonetic">{testPrepCurrentCardData.definitionNote}</p>}</div>
+                                    <button type="button" className="suggestion-btn test-prep-flip-btn" onClick={() => setFlashcardFlipped(false)}><img src="/assets/Flip.svg" alt="" className="test-prep-action-icon" width={16} height={16} /> Flip card</button>
+                                  </div>
+                                </div>
+                              </motion.div>
+                              <div className="test-prep-flashcard-controls">
+                                <button type="button" className="test-prep-control-btn test-prep-control-edge" aria-label="Back" onClick={() => { setTestPrepCurrentCard((c) => Math.max(1, c - 1)); setFlashcardFlipped(false); }}><img src="/assets/Previous.svg" alt="" width={20} height={20} /></button>
+                                <div className="test-prep-flashcard-controls-center">
+                                  <button type="button" className="test-prep-control-wrong" aria-label="Don't know" onClick={() => { if (flashcardExitDirection) return; setFlashcardExitDirection('left'); }}><img src="/assets/Close.svg" alt="" width={20} height={20} /></button>
+                                  <button type="button" className="test-prep-control-right" aria-label="Know" onClick={() => { if (flashcardExitDirection) return; setFlashcardExitDirection('right'); }}><img src="/assets/Check.svg" alt="" width={20} height={20} /></button>
+                                </div>
+                                <button type="button" className="test-prep-control-btn test-prep-control-edge" aria-label="Shuffle"><img src="/assets/Shuffle.svg" alt="" width={20} height={20} /></button>
+                              </div>
+                            </div>
+                            <div className="test-prep-flashcard-footer">
+                              <label className="test-prep-track-toggle"><input type="checkbox" defaultChecked className="test-prep-track-checkbox" /><span className="test-prep-track-label">Track Progress</span><span className="test-prep-track-switch" /></label>
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="test-prep-chat-experience">
+                          <div className="test-prep-chat-messages">
+                            <div className={`chat-bubble chat-bubble--user test-prep-intro-user ${testPrepIntroPhase !== 'idle' ? 'test-prep-intro-user--animate' : ''}`}>
+                              Help me prepare for a test in {testPrepClass ?? 'German'} using Flashcards and set a timer to see how quickly I'm able to complete them.
+                            </div>
+                            {testPrepIntroPhase !== 'idle' && (
+                              <>
+                                <div className="chat-bubble chat-bubble--assistant test-prep-intro-agent">
+                                  {agentTypingIndex > 0 ? agentIntroMessages[0] : agentIntroMessages[0].slice(0, agentTypingLength)}
+                                  {agentTypingIndex === 0 && agentTypingLength < agentIntroMessages[0].length && <span className="test-prep-typing-cursor" aria-hidden="true" />}
+                                </div>
+                                {agentTypingIndex >= 1 && (
+                                  <div className="chat-bubble chat-bubble--assistant test-prep-intro-agent">
+                                    {agentTypingIndex > 1 ? agentIntroMessages[1] : agentIntroMessages[1].slice(0, agentTypingLength)}
+                                    {agentTypingIndex === 1 && agentTypingLength < agentIntroMessages[1].length && <span className="test-prep-typing-cursor" aria-hidden="true" />}
+                                  </div>
+                                )}
+                                {agentTypingIndex >= 2 && (
+                                  <div className="chat-bubble chat-bubble--assistant test-prep-intro-agent">
+                                    {agentTypingIndex > 2 ? agentIntroMessages[2] : agentIntroMessages[2].slice(0, agentTypingLength)}
+                                    {agentTypingIndex === 2 && agentTypingLength < agentIntroMessages[2].length && <span className="test-prep-typing-cursor" aria-hidden="true" />}
+                                  </div>
+                                )}
+                              </>
+                            )}
+                            <div className={`test-prep-chat-actions test-prep-intro-actions ${testPrepIntroPhase >= 'actions' ? 'test-prep-intro-actions--animate' : ''}`}>
+                              <button type="button" className="suggestion-btn test-prep-speak-btn">
+                                <img src="/assets/Speak.svg" alt="" className="test-prep-action-icon" width={16} height={16} />
+                                Speak
+                              </button>
+                              <button type="button" className="icon-btn test-prep-icon-btn" aria-label="Like"><img src="/assets/ThumbsUp.svg" alt="" width={16} height={16} /></button>
+                              <button type="button" className="icon-btn test-prep-icon-btn" aria-label="Dislike"><img src="/assets/ThumbsDown.svg" alt="" width={16} height={16} /></button>
+                              <button type="button" className="icon-btn test-prep-icon-btn" aria-label="Copy"><img src="/assets/Copy.svg" alt="" width={16} height={16} /></button>
+                            </div>
+                            {testPrepUserMessages.map((msg, i) => (
+                              <div key={i} className="chat-bubble chat-bubble--user test-prep-intro-user test-prep-intro-user--animate">{msg}</div>
+                            ))}
+                          </div>
+                          <div className={`test-prep-composer-wrap test-prep-intro-composer ${testPrepIntroPhase >= 'composer' ? 'test-prep-intro-composer--animate' : ''}`}>
+                            <div className="test-prep-composer">
+                              <div className="test-prep-composer-top-row">
+                                <input
+                                  type="text"
+                                  className="test-prep-reply-input"
+                                  placeholder="Reply..."
+                                  aria-label="Reply"
+                                  value={testPrepReplyInput}
+                                  onChange={(e) => setTestPrepReplyInput(e.target.value)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') {
+                                      e.preventDefault()
+                                      handleTestPrepReplySubmit()
+                                    }
+                                  }}
+                                />
+                              </div>
+                              <div className="composer-toolbar test-prep-composer-toolbar">
+                                <div className="composer-toolbar-left">
+                                  <button type="button" className="composer-tool-btn" aria-label="Attach file"><img src="/assets/Paperclip.svg" alt="" className="composer-tool-icon" /></button>
+                                  <button type="button" className="composer-tool-btn" aria-label="Quick action"><img src="/assets/Lightningbolt.svg" alt="" className="composer-tool-icon" /></button>
+                                </div>
+                                <div className="composer-toolbar-right">
+                                  <button type="button" className="composer-icon-btn" aria-label="Voice input"><img src="/assets/Microphone.svg" alt="" className="composer-icon-img" /></button>
+                                  <button type="button" className="composer-send-btn" aria-label="Send" onClick={handleTestPrepReplySubmit}><img src="/assets/Paper_Airplane.svg" alt="" className="composer-send-icon" /></button>
+                                </div>
+                              </div>
+                            </div>
+                            <p className="composer-disclaimer test-prep-disclaimer">
+                              AI can make mistakes, please verify important details. Your data is private and never shared. Teachers or school leaders may view messages to support your learning.
+                            </p>
+                          </div>
+                        </div>
+                      )}
+                      {view === 'test-prep-chat' && (
+                        <div className="test-prep-flashcard-tab-bar" role="tablist" aria-label="Flashcard view">
+                          <button type="button" role="tab" aria-selected={(powerUpViewMode as 'widget' | 'panel' | 'middle') === 'widget'} className={`test-prep-flashcard-tab ${(powerUpViewMode as 'widget' | 'panel' | 'middle') === 'widget' ? 'test-prep-flashcard-tab--active' : ''}`} onClick={() => { setPowerUpViewMode('widget'); setPowerUpPanelOpen(true); }}>Widget</button>
+                          <button type="button" role="tab" aria-selected={powerUpPanelOpen && powerUpViewMode === 'panel'} className={`test-prep-flashcard-tab ${powerUpPanelOpen && powerUpViewMode === 'panel' ? 'test-prep-flashcard-tab--active' : ''}`} onClick={() => { setPowerUpViewMode('panel'); setPowerUpPanelOpen(true); }}>Panel</button>
+                          <button type="button" role="tab" aria-selected={powerUpPanelOpen && powerUpViewMode === 'middle'} className={`test-prep-flashcard-tab ${powerUpPanelOpen && powerUpViewMode === 'middle' ? 'test-prep-flashcard-tab--active' : ''}`} onClick={() => { setPowerUpViewMode('middle'); setPowerUpPanelOpen(true); }}>Middle</button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  {powerUpAsSidebar && (
+                    <aside className="test-prep-flashcard-sidebar test-prep-panel-full-height" aria-label="Flashcards" style={{ width: flashcardPanelWidth }}>
+                      <div className="test-prep-flashcard-sidebar-resize" onMouseDown={handleFlashcardPanelResizeStart} role="separator" aria-orientation="vertical" aria-label="Resize panel" />
+                      <header className="test-prep-flashcard-header test-prep-flashcard-sidebar-header">
+                        <button type="button" className="icon-btn test-prep-dismiss-btn" aria-label="Close panel" onClick={() => { setPowerUpPanelOpen(false); }}><img src="/assets/Close.svg" alt="" width={20} height={20} /></button>
+                        <div className="test-prep-flashcard-header-center">
+                          <div className="test-prep-flashcard-title-wrap">
+                            <span className="test-prep-flashcard-icon-wrap" aria-hidden="true"><img src="/assets/Flashcards.svg" alt="" className="test-prep-flashcard-icon" width={16} height={16} /></span>
+                            <span className="test-prep-flashcard-title">{testPrepClass ?? 'German'} Test: Greetings, Basics and Travel</span>
+                          </div>
+                          <button type="button" className="test-prep-edit-btn">Edit <img src="/assets/caret-down.svg" alt="" width={14} height={14} className="test-prep-edit-caret" /></button>
+                        </div>
+                      </header>
+                      <div className="test-prep-flashcard-body test-prep-flashcard-sidebar-body">
+                        <div className="test-prep-flashcard-scroll">
+                          <div className="test-prep-flashcard-hero"><img src="/assets/BrandenburgGate.jpg" alt="Brandenburg Gate, Berlin" className="test-prep-flashcard-hero-img" /></div>
+                          <div className="test-prep-flashcard-progress">
+                            <div className="test-prep-flashcard-progress-left">
+                              <div className="test-prep-flashcard-progress-ring" aria-hidden="true"><svg width="24" height="24" viewBox="0 0 24 24" className="test-prep-progress-ring-svg"><circle className="test-prep-progress-ring-track" cx="12" cy="12" r="10" fill="none" strokeWidth="2.5" /><circle className="test-prep-progress-ring-fill" cx="12" cy="12" r="10" fill="none" strokeWidth="2.5" strokeDasharray={`${(testPrepCurrentCard / testPrepTotalCards) * 62.83} 62.83`} strokeLinecap="round" transform="rotate(-90 12 12)" /></svg></div>
+                              <span className="test-prep-flashcard-progress-text">{testPrepCurrentCard} of {testPrepTotalCards} cards</span>
+                            </div>
+                            <span className="test-prep-flashcard-progress-known">{Math.round((testPrepKnownCount / testPrepTotalCards) * 100)}% answers known</span>
+                          </div>
+                          <motion.div className={`test-prep-flashcard-card ${flashcardFlipped ? 'test-prep-flashcard-card--flipped' : ''}`} animate={{ x: flashcardExitDirection === 'left' ? '-130%' : flashcardExitDirection === 'right' ? '130%' : 0, y: flashcardExitDirection ? -20 : 0, rotate: flashcardExitDirection === 'left' ? -48 : flashcardExitDirection === 'right' ? 48 : 0, scale: flashcardExitDirection ? 0.82 : 1, opacity: flashcardExitDirection ? 0.2 : 1 }} transition={{ type: 'spring', stiffness: 320, damping: 26 }} onAnimationComplete={() => { if (flashcardExitDirection === 'left') { setTestPrepCurrentCard((c) => Math.min(testPrepTotalCards, c + 1)); setFlashcardFlipped(false); setFlashcardExitDirection(null); } else if (flashcardExitDirection === 'right') { setTestPrepCurrentCard((c) => Math.min(testPrepTotalCards, c + 1)); setTestPrepKnownCount((k) => Math.min(testPrepTotalCards, k + 1)); setFlashcardFlipped(false); setFlashcardExitDirection(null); } }} style={{ pointerEvents: flashcardExitDirection ? 'none' : undefined }}>
+                            <div className="test-prep-flashcard-inner">
+                              <div className="test-prep-flashcard-front">
+                                <div className="test-prep-flashcard-card-actions"><button type="button" className="suggestion-btn test-prep-listen-btn"><img src="/assets/Audio.svg" alt="" className="test-prep-action-icon" width={16} height={16} /> Listen</button></div>
+                                <div className="test-prep-flashcard-content"><p className="test-prep-flashcard-term">{testPrepCurrentCardData.term}</p><p className="test-prep-flashcard-phonetic">{testPrepCurrentCardData.phonetic}</p></div>
+                                <button type="button" className="suggestion-btn test-prep-flip-btn" onClick={() => setFlashcardFlipped(true)}><img src="/assets/Flip.svg" alt="" className="test-prep-action-icon" width={16} height={16} /> Flip card</button>
+                              </div>
+                              <div className="test-prep-flashcard-back">
+                                <div className="test-prep-flashcard-content test-prep-flashcard-back-content"><p className="test-prep-flashcard-term">{testPrepCurrentCardData.definition}</p>{testPrepCurrentCardData.definitionNote && <p className="test-prep-flashcard-phonetic">{testPrepCurrentCardData.definitionNote}</p>}</div>
+                                <button type="button" className="suggestion-btn test-prep-flip-btn" onClick={() => setFlashcardFlipped(false)}><img src="/assets/Flip.svg" alt="" className="test-prep-action-icon" width={16} height={16} /> Flip card</button>
+                              </div>
+                            </div>
+                          </motion.div>
+                          <div className="test-prep-flashcard-controls">
+                            <button type="button" className="test-prep-control-btn test-prep-control-edge" aria-label="Back" onClick={() => { setTestPrepCurrentCard((c) => Math.max(1, c - 1)); setFlashcardFlipped(false); }}><img src="/assets/Previous.svg" alt="" width={20} height={20} /></button>
+                            <div className="test-prep-flashcard-controls-center">
+                              <button type="button" className="test-prep-control-wrong" aria-label="Don't know" onClick={() => { if (flashcardExitDirection) return; setFlashcardExitDirection('left'); }}><img src="/assets/Close.svg" alt="" width={20} height={20} /></button>
+                              <button type="button" className="test-prep-control-right" aria-label="Know" onClick={() => { if (flashcardExitDirection) return; setFlashcardExitDirection('right'); }}><img src="/assets/Check.svg" alt="" width={20} height={20} /></button>
+                            </div>
+                            <button type="button" className="test-prep-control-btn test-prep-control-edge" aria-label="Shuffle"><img src="/assets/Shuffle.svg" alt="" width={20} height={20} /></button>
+                          </div>
+                        </div>
+                        <div className="test-prep-flashcard-footer"><label className="test-prep-track-toggle"><input type="checkbox" defaultChecked className="test-prep-track-checkbox" /><span className="test-prep-track-label">Track Progress</span><span className="test-prep-track-switch" /></label></div>
+                      </div>
+                    </aside>
+                  )}
+                  {powerUpViewMode === 'middle' && (
+                    <aside className="test-prep-chat-sidebar test-prep-panel-full-height" aria-label="Chat" style={{ width: chatPanelWidth }}>
+                      <div className="test-prep-chat-sidebar-resize" onMouseDown={handleChatPanelResizeStart} role="separator" aria-orientation="vertical" aria-label="Resize chat panel" />
+                      <div className="test-prep-chat-experience test-prep-chat-experience--in-sidebar">
+                        <div className="test-prep-chat-messages">
+                          <div className={`chat-bubble chat-bubble--user test-prep-intro-user ${testPrepIntroPhase !== 'idle' ? 'test-prep-intro-user--animate' : ''}`}>Help me prepare for a test in {testPrepClass ?? 'German'} using Flashcards and set a timer to see how quickly I'm able to complete them.</div>
+                          {testPrepIntroPhase !== 'idle' && (
+                            <>
+                              <div className="chat-bubble chat-bubble--assistant test-prep-intro-agent">{agentTypingIndex > 0 ? agentIntroMessages[0] : agentIntroMessages[0].slice(0, agentTypingLength)}{agentTypingIndex === 0 && agentTypingLength < agentIntroMessages[0].length && <span className="test-prep-typing-cursor" aria-hidden="true" />}</div>
+                              {agentTypingIndex >= 1 && <div className="chat-bubble chat-bubble--assistant test-prep-intro-agent">{agentTypingIndex > 1 ? agentIntroMessages[1] : agentIntroMessages[1].slice(0, agentTypingLength)}{agentTypingIndex === 1 && agentTypingLength < agentIntroMessages[1].length && <span className="test-prep-typing-cursor" aria-hidden="true" />}</div>}
+                              {agentTypingIndex >= 2 && <div className="chat-bubble chat-bubble--assistant test-prep-intro-agent">{agentTypingIndex > 2 ? agentIntroMessages[2] : agentIntroMessages[2].slice(0, agentTypingLength)}{agentTypingIndex === 2 && agentTypingLength < agentIntroMessages[2].length && <span className="test-prep-typing-cursor" aria-hidden="true" />}</div>}
+                            </>
+                          )}
+                          <div className={`test-prep-chat-actions test-prep-intro-actions ${testPrepIntroPhase >= 'actions' ? 'test-prep-intro-actions--animate' : ''}`}>
+                            <button type="button" className="suggestion-btn test-prep-speak-btn"><img src="/assets/Speak.svg" alt="" className="test-prep-action-icon" width={16} height={16} /> Speak</button>
+                            <button type="button" className="icon-btn test-prep-icon-btn" aria-label="Like"><img src="/assets/ThumbsUp.svg" alt="" width={16} height={16} /></button>
+                            <button type="button" className="icon-btn test-prep-icon-btn" aria-label="Dislike"><img src="/assets/ThumbsDown.svg" alt="" width={16} height={16} /></button>
+                            <button type="button" className="icon-btn test-prep-icon-btn" aria-label="Copy"><img src="/assets/Copy.svg" alt="" width={16} height={16} /></button>
+                          </div>
+                          {testPrepUserMessages.map((msg, i) => (
+                            <div key={i} className="chat-bubble chat-bubble--user test-prep-intro-user test-prep-intro-user--animate">{msg}</div>
+                          ))}
+                        </div>
+                        <div className={`test-prep-composer-wrap test-prep-intro-composer ${testPrepIntroPhase >= 'composer' ? 'test-prep-intro-composer--animate' : ''}`}>
+                          <div className="test-prep-composer">
+                            <div className="test-prep-composer-top-row"><input type="text" className="test-prep-reply-input" placeholder="Reply..." aria-label="Reply" value={testPrepReplyInput} onChange={(e) => setTestPrepReplyInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleTestPrepReplySubmit(); } }} /></div>
+                            <div className="composer-toolbar test-prep-composer-toolbar">
+                              <div className="composer-toolbar-left"><button type="button" className="composer-tool-btn" aria-label="Attach file"><img src="/assets/Paperclip.svg" alt="" className="composer-tool-icon" /></button><button type="button" className="composer-tool-btn" aria-label="Quick action"><img src="/assets/Lightningbolt.svg" alt="" className="composer-tool-icon" /></button></div>
+                              <div className="composer-toolbar-right"><button type="button" className="composer-icon-btn" aria-label="Voice input"><img src="/assets/Microphone.svg" alt="" className="composer-icon-img" /></button><button type="button" className="composer-send-btn" aria-label="Send" onClick={handleTestPrepReplySubmit}><img src="/assets/Paper_Airplane.svg" alt="" className="composer-send-icon" /></button></div>
+                            </div>
+                          </div>
+                          <p className="composer-disclaimer test-prep-disclaimer">AI can make mistakes, please verify important details. Your data is private and never shared. Teachers or school leaders may view messages to support your learning.</p>
+                        </div>
+                      </div>
+                    </aside>
+                  )}
+                </>
+              ) : (
+                <>
               {/* Full-width header: same position as before (Accessibility, Language, New, Menu) */}
               <header className="test-prep-chat-header test-prep-chat-header--full">
                 <span className="test-prep-chat-title">
@@ -818,6 +1254,9 @@ function App() {
                             <button type="button" className="icon-btn test-prep-icon-btn" aria-label="Dislike"><img src="/assets/ThumbsDown.svg" alt="" width={16} height={16} /></button>
                             <button type="button" className="icon-btn test-prep-icon-btn" aria-label="Copy"><img src="/assets/Copy.svg" alt="" width={16} height={16} /></button>
                           </div>
+                          <div className={`test-prep-chat-blob-wrap ${testPrepIntroPhase >= 'composer' ? 'test-prep-chat-blob-wrap--animate' : ''}`} aria-hidden="true">
+                            <TokenBlob className="token-circle token-circle--below-actions" size={48} mode="idle" />
+                          </div>
                         </div>
                         <div className={`test-prep-composer-wrap test-prep-intro-composer ${testPrepIntroPhase >= 'composer' ? 'test-prep-intro-composer--animate' : ''}`}>
                           <div className="test-prep-composer">
@@ -891,6 +1330,12 @@ function App() {
                     <button type="button" className="icon-btn test-prep-icon-btn" aria-label="Dislike"><img src="/assets/ThumbsDown.svg" alt="" width={16} height={16} /></button>
                     <button type="button" className="icon-btn test-prep-icon-btn" aria-label="Copy"><img src="/assets/Copy.svg" alt="" width={16} height={16} /></button>
                   </div>
+                  <div className={`test-prep-chat-blob-wrap ${testPrepIntroPhase >= 'composer' ? 'test-prep-chat-blob-wrap--animate' : ''}`} aria-hidden="true">
+                    <TokenBlob className="token-circle token-circle--below-actions" size={48} mode="idle" />
+                  </div>
+                  {testPrepUserMessages.map((msg, i) => (
+                    <div key={i} className="chat-bubble chat-bubble--user test-prep-intro-user test-prep-intro-user--animate">{msg}</div>
+                  ))}
                 </div>
                 <div className={`test-prep-composer-wrap test-prep-intro-composer ${testPrepIntroPhase >= 'composer' ? 'test-prep-intro-composer--animate' : ''}`}>
                   <div className="test-prep-composer">
@@ -1376,6 +1821,8 @@ function App() {
                   </div>
                 )}
               </div>
+                  </>
+                )}
             </main>
           ) : (
           <main className="main-content">
@@ -1384,6 +1831,7 @@ function App() {
             {!composerOpen && (
               <>
                 <div className="content-inner">
+                  <PongBlob className="token-circle token-circle--above-greeting" size={256} />
                   <h1 className="greeting">Hi, Annika!</h1>
                   <p className="instruction">Pick a starting point and I'll guide you step by step.</p>
                   <div className="suggestion-buttons">
