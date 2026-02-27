@@ -25,6 +25,7 @@ export function createPongLoader(
 
   const gl = canvas.getContext('webgl', { alpha: true, premultipliedAlpha: false })
   if (!gl) return createCSSFallback(container, canvas, size, color)
+  const ctx = gl
 
   const vsrc = `attribute vec2 a_pos;void main(){gl_Position=vec4(a_pos,0,1);}`
   const fsrc = `
@@ -185,46 +186,46 @@ void main() {
 `
 
   function compileShader(type: number, src: string): WebGLShader | null {
-    const s = gl.createShader(type)
+    const s = ctx.createShader(type)
     if (!s) return null
-    gl.shaderSource(s, src)
-    gl.compileShader(s)
-    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
-      console.error(gl.getShaderInfoLog(s))
+    ctx.shaderSource(s, src)
+    ctx.compileShader(s)
+    if (!ctx.getShaderParameter(s, ctx.COMPILE_STATUS)) {
+      console.error(ctx.getShaderInfoLog(s))
       return null
     }
     return s
   }
 
-  const vs = compileShader(gl.VERTEX_SHADER, vsrc)
-  const fs = compileShader(gl.FRAGMENT_SHADER, fsrc)
+  const vs = compileShader(ctx.VERTEX_SHADER, vsrc)
+  const fs = compileShader(ctx.FRAGMENT_SHADER, fsrc)
   if (!vs || !fs) return createCSSFallback(container, canvas, size, color)
 
-  const prog = gl.createProgram()
+  const prog = ctx.createProgram()
   if (!prog) return createCSSFallback(container, canvas, size, color)
-  gl.attachShader(prog, vs)
-  gl.attachShader(prog, fs)
-  gl.linkProgram(prog)
-  gl.useProgram(prog)
+  ctx.attachShader(prog, vs)
+  ctx.attachShader(prog, fs)
+  ctx.linkProgram(prog)
+  ctx.useProgram(prog)
 
-  const buf = gl.createBuffer()
-  gl.bindBuffer(gl.ARRAY_BUFFER, buf)
-  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW)
-  const aPos = gl.getAttribLocation(prog, 'a_pos')
-  gl.enableVertexAttribArray(aPos)
-  gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0)
+  const buf = ctx.createBuffer()
+  ctx.bindBuffer(ctx.ARRAY_BUFFER, buf)
+  ctx.bufferData(ctx.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), ctx.STATIC_DRAW)
+  const aPos = ctx.getAttribLocation(prog, 'a_pos')
+  ctx.enableVertexAttribArray(aPos)
+  ctx.vertexAttribPointer(aPos, 2, ctx.FLOAT, false, 0, 0)
 
-  const uTime = gl.getUniformLocation(prog, 'u_time')
-  const uRes = gl.getUniformLocation(prog, 'u_res')
-  const uColor = gl.getUniformLocation(prog, 'u_color')
-  const uPong = gl.getUniformLocation(prog, 'u_pong')
+  const uTime = ctx.getUniformLocation(prog, 'u_time')
+  const uRes = ctx.getUniformLocation(prog, 'u_res')
+  const uColor = ctx.getUniformLocation(prog, 'u_color')
+  const uPong = ctx.getUniformLocation(prog, 'u_pong')
 
-  gl.uniform2f(uRes, size * DPR, size * DPR)
-  gl.uniform3f(uColor, color[0], color[1], color[2])
-  gl.viewport(0, 0, size * DPR, size * DPR)
-  gl.enable(gl.BLEND)
-  gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
-  gl.clearColor(0, 0, 0, 0)
+  ctx.uniform2f(uRes, size * DPR, size * DPR)
+  ctx.uniform3f(uColor, color[0], color[1], color[2])
+  ctx.viewport(0, 0, size * DPR, size * DPR)
+  ctx.enable(ctx.BLEND)
+  ctx.blendFunc(ctx.SRC_ALPHA, ctx.ONE_MINUS_SRC_ALPHA)
+  ctx.clearColor(0, 0, 0, 0)
 
   const AW = 0.42
   const CR = 0.2
@@ -362,10 +363,10 @@ void main() {
       pongActive = false
     }
 
-    gl.clear(gl.COLOR_BUFFER_BIT)
-    gl.uniform1f(uTime, phase)
-    gl.uniform4f(uPong, frozenPong[0], frozenPong[1], frozenPong[2], frozenPong[3])
-    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4)
+    ctx.clear(ctx.COLOR_BUFFER_BIT)
+    ctx.uniform1f(uTime, phase)
+    ctx.uniform4f(uPong, frozenPong[0], frozenPong[1], frozenPong[2], frozenPong[3])
+    ctx.drawArrays(ctx.TRIANGLE_STRIP, 0, 4)
 
     rafId = requestAnimationFrame(animate)
   }
@@ -376,10 +377,10 @@ void main() {
     destroy() {
       destroyed = true
       if (rafId !== null) cancelAnimationFrame(rafId)
-      gl.deleteProgram(prog)
-      gl.deleteShader(vs)
-      gl.deleteShader(fs)
-      gl.deleteBuffer(buf)
+      ctx.deleteProgram(prog)
+      ctx.deleteShader(vs)
+      ctx.deleteShader(fs)
+      ctx.deleteBuffer(buf)
       canvas.remove()
     },
   }
