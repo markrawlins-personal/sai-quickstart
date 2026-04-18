@@ -13,6 +13,8 @@
   min-height: 0;
   overflow: hidden;
   position: relative;
+  /* Same as main content so transparent sidebar shows this instead of app-shell white */
+  background: var(--color-surface-default);
 }
 
 /* ========== Liquid Glass (Apple-style) – CSS variables and reusable classes ========== */
@@ -225,10 +227,14 @@
   padding: var(--spacing-4) var(--spacing-2);
   display: flex;
   flex-direction: column;
-  background: transparent;
+  background: transparent !important;
   z-index: 10;
   overflow: hidden;
   transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.sidebar.sidebar-open {
+  background: transparent !important;
 }
 
 /* Collapsed: narrow icon rail */
@@ -236,6 +242,7 @@
   width: 64px;
   padding: var(--spacing-2);
   align-items: center;
+  background: transparent !important;
 }
 
 .sidebar-collapsed .sidebar-header {
@@ -521,6 +528,16 @@
   padding: var(--spacing-8);
   max-width: 600px;
   transition: opacity 0.3s ease;
+  /* Shift dot, greeting, and buttons up so they sit more centered on screen */
+  transform: translateY(-120px);
+}
+
+/* Stack dot + heading on one vertical axis so the animation stays centered above “Hi, Annika!” */
+.greeting-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
 }
 
 /* Reusable token circle / liquid blob – uses --color-accent (#2869DD), animatable */
@@ -532,12 +549,18 @@
 
 .token-circle--above-greeting {
   display: block;
-  margin-left: auto;
-  margin-right: auto;
+  flex-shrink: 0;
   margin-top: -24px;
   margin-bottom: var(--spacing-4);
   animation: greeting-enter 0.6s cubic-bezier(0.22, 1, 0.36, 1) forwards;
   opacity: 0;
+}
+
+/* Canvas is display:block from the loader — center it in the column */
+.token-circle--above-greeting canvas {
+  display: block;
+  margin-left: auto;
+  margin-right: auto;
 }
 
 /* Blob below Speak button in test-prep chat (side panel + middle panel) */
@@ -615,6 +638,190 @@
     width: 100%;
     max-width: 280px;
     justify-content: center;
+  }
+}
+
+/* ========== Mobile & touch optimizations ========== */
+@media (max-width: 768px) {
+  /* Mobile header: hamburger left of SchoolAI logo */
+  .mobile-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 9;
+    min-height: 56px;
+    padding: 12px 16px;
+    padding-left: max(16px, env(safe-area-inset-left));
+    padding-right: max(16px, env(safe-area-inset-right));
+    padding-top: max(12px, env(safe-area-inset-top));
+    background: var(--color-surface-elevated);
+    border-bottom: 1px solid var(--color-stroke-light);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+  }
+
+  .mobile-hamburger {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    min-width: 44px;
+    min-height: 44px;
+    padding: 0;
+    border: none;
+    background: transparent;
+    border-radius: 50%;
+    cursor: pointer;
+    transition: background 0.15s ease;
+  }
+
+  .mobile-hamburger:hover {
+    background: rgba(0, 0, 0, 0.06);
+  }
+
+  .mobile-hamburger:active {
+    background: rgba(0, 0, 0, 0.1);
+  }
+
+  .mobile-hamburger-icon {
+    width: 24px;
+    height: 24px;
+    filter: var(--icon-filter-primary);
+  }
+
+  .mobile-header-logo {
+    height: 36px;
+    width: auto;
+    flex-shrink: 0;
+  }
+
+  /* Sidebar as overlay on mobile: off-screen when closed */
+  .sidebar {
+    width: min(320px, 85vw);
+    max-width: 320px;
+    transform: translateX(-100%);
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.3s ease;
+    background: transparent !important;
+    box-shadow: none;
+  }
+
+  .sidebar.sidebar-open {
+    transform: translateX(0);
+    box-shadow: 8px 0 24px rgba(0, 0, 0, 0.12);
+    background: transparent !important;
+  }
+
+  .sidebar.sidebar-collapsed {
+    width: min(320px, 85vw);
+    max-width: 320px;
+    background: transparent !important;
+  }
+
+  .sidebar.sidebar-collapsed .sidebar-logo {
+    opacity: 1;
+    max-width: none;
+    min-width: 0;
+  }
+
+  .sidebar-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 8;
+    background: rgba(0, 0, 0, 0.35);
+    animation: sidebar-backdrop-in 0.2s ease-out;
+  }
+
+  @keyframes sidebar-backdrop-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+
+  .main-content {
+    padding-top: calc(56px + env(safe-area-inset-top, 0));
+  }
+
+  .content-inner {
+    padding-left: max(var(--spacing-4), env(safe-area-inset-left));
+    padding-right: max(var(--spacing-4), env(safe-area-inset-right));
+  }
+
+  .greeting {
+    font-size: clamp(28px, 8vw, 42px);
+  }
+
+  .instruction {
+    font-size: 18px;
+    line-height: 1.5;
+    margin-bottom: 40px;
+  }
+
+  .composer-card {
+    width: min(700px, calc(100vw - 32px));
+    min-width: min(700px, calc(100vw - 32px));
+    max-width: min(700px, calc(100vw - 32px));
+    padding: 20px 20px;
+    padding-left: max(20px, env(safe-area-inset-left));
+    padding-right: max(20px, env(safe-area-inset-right));
+  }
+
+  .toolbar-float {
+    top: max(16px, env(safe-area-inset-top));
+    right: max(16px, env(safe-area-inset-right));
+  }
+
+  .icon-btn,
+  .icon-img,
+  .icon-img-md {
+    min-width: 44px;
+    min-height: 44px;
+    width: 44px;
+    height: 44px;
+  }
+
+  .suggestion-btn {
+    min-height: 44px;
+    padding: 12px 20px;
+  }
+
+  .composer-tool-btn {
+    min-width: 44px;
+    min-height: 44px;
+    width: 44px;
+    height: 44px;
+  }
+}
+
+@media (max-width: 640px) {
+  .powerup-minimized-circle-wrap {
+    right: max(24px, env(safe-area-inset-right));
+    bottom: max(24px, env(safe-area-inset-bottom));
+  }
+
+  .powerup-widget--minimizing {
+    right: max(24px, env(safe-area-inset-right)) !important;
+    bottom: max(24px, env(safe-area-inset-bottom)) !important;
+    left: auto !important;
+    top: auto !important;
+  }
+
+  .test-prep-chat-messages {
+    padding-left: max(16px, env(safe-area-inset-left));
+    padding-right: max(16px, env(safe-area-inset-right));
+  }
+
+  .test-prep-composer-wrap {
+    padding-left: max(16px, env(safe-area-inset-left));
+    padding-right: max(16px, env(safe-area-inset-right));
+  }
+
+  .test-prep-flashcard-center-body .test-prep-flashcard-scroll,
+  .powerup-widget--fullscreen .powerup-widget-body .test-prep-flashcard-scroll {
+    padding-left: max(20px, env(safe-area-inset-left));
+    padding-right: max(20px, env(safe-area-inset-right));
   }
 }
 
@@ -1068,6 +1275,13 @@
   align-items: stretch;
   justify-content: flex-start;
   overflow: hidden;
+  /* Push content right of left nav; when nav opens, tab bar (and content) move right */
+  margin-left: 64px;
+  transition: margin-left 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.app-body:has(.sidebar.sidebar-open) .main-content.test-prep-layout {
+  margin-left: var(--spacing-60);
 }
 
 .test-prep-layout {
@@ -1192,6 +1406,8 @@
   display: flex;
   flex-direction: column;
   background: var(--color-surface-elevated);
+  padding-left: 32px;
+  padding-right: 32px;
 }
 
 .test-prep-chat-sidebar .test-prep-chat-messages,
@@ -1199,8 +1415,18 @@
   background: var(--color-surface-elevated);
 }
 
+.test-prep-chat-sidebar .test-prep-composer-wrap {
+  padding-left: 16px;
+  padding-right: 16px;
+  padding-bottom: 24px;
+}
+
 .test-prep-chat-sidebar .test-prep-composer {
   background: var(--color-surface-default);
+  padding-left: 24px;
+  padding-right: 24px;
+  padding-top: 20px;
+  padding-bottom: 20px;
 }
 
 .test-prep-chat-sidebar .test-prep-chat-messages {
@@ -1279,11 +1505,53 @@
 }
 
 /* Temporary button: open flashcard panel as sidebar */
-/* Tab bar: toggle between Widget and Panel (bottom left) */
+/* Wrapper: tab bar to the left of chat/content; pushes right when nav opens via .main-content margin */
+.test-prep-tab-bar-and-content {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Column to the left of chat: padding off the left nav, tab bar inside */
+/* Tab bar floats at bottom over chat, does not push content */
+.test-prep-flashcard-tab-bar-wrap {
+  position: fixed;
+  bottom: max(24px, env(safe-area-inset-bottom));
+  left: calc(64px + var(--spacing-4));
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  padding-left: 0;
+  padding-right: 0;
+  transition: left 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.app-body:has(.sidebar.sidebar-open) .test-prep-flashcard-tab-bar-wrap {
+  left: calc(var(--spacing-60) + var(--spacing-4));
+}
+
+/* Content area (chat/panel) fills remaining space to the right of the tab bar */
+.test-prep-tab-bar-content {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* Panel/Middle: layout-center and flashcard sidebar side by side */
+.test-prep-tab-bar-content--with-panel {
+  flex-direction: row;
+  align-items: stretch;
+}
+
+/* Tab bar: to the left of chat, no longer absolute */
 .test-prep-flashcard-tab-bar {
-  position: absolute;
-  bottom: 16px;
-  left: calc(var(--spacing-60) + 8px);
   z-index: 40;
   display: flex;
   align-items: stretch;
@@ -1869,15 +2137,7 @@
   cursor: pointer;
   overflow: hidden;
   background: var(--color-surface-elevated);
-  box-shadow:
-    0 2px 4px rgba(0, 0, 0, 0.06),
-    0 4px 8px rgba(0, 0, 0, 0.06),
-    0 8px 16px rgba(0, 0, 0, 0.06),
-    0 16px 32px rgba(0, 0, 0, 0.08),
-    0 24px 48px rgba(0, 0, 0, 0.08),
-    0 32px 64px rgba(0, 0, 0, 0.08),
-    0 48px 96px rgba(0, 0, 0, 0.08),
-    0 64px 128px rgba(0, 0, 0, 0.08);
+  box-shadow: var(--shadow-minimized-circle);
   transition: transform 0.15s ease;
 }
 
@@ -1938,6 +2198,14 @@
   z-index: 101;
 }
 
+/* Panel/Middle: timer at bottom-right of chat area only, not over the right panel */
+.timer-minimized-circle-wrap--in-chat {
+  position: absolute;
+  right: 24px;
+  bottom: max(24px, env(safe-area-inset-bottom));
+  z-index: 50;
+}
+
 .timer-minimized-circle-tooltip {
   position: absolute;
   right: 100%;
@@ -1983,16 +2251,8 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #fff;
-  box-shadow:
-    0 2px 4px rgba(0, 0, 0, 0.06),
-    0 4px 8px rgba(0, 0, 0, 0.06),
-    0 8px 16px rgba(0, 0, 0, 0.06),
-    0 16px 32px rgba(0, 0, 0, 0.08),
-    0 24px 48px rgba(0, 0, 0, 0.08),
-    0 32px 64px rgba(0, 0, 0, 0.08),
-    0 48px 96px rgba(0, 0, 0, 0.08),
-    0 64px 128px rgba(0, 0, 0, 0.08);
+  background: var(--color-surface-elevated);
+  box-shadow: var(--shadow-minimized-circle);
   transition: transform 0.15s ease;
 }
 

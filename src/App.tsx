@@ -1,6 +1,7 @@
 import { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback } from 'react'
 import { motion } from 'motion/react'
 import { createPongLoader } from './pongLoader'
+import { createSnakeLoader } from './snakeLoader'
 import './App.css'
 
 const suggestionButtons = [
@@ -230,10 +231,11 @@ function TokenBlob({
   )
 }
 
-// #2869DD in 0–1 RGB for WebGL pong
-const PONG_ACCENT_COLOR: [number, number, number] = [40 / 255, 105 / 255, 221 / 255]
+// #2869DD in 0–1 RGB for WebGL dot animations
+const DOT_ACCENT_COLOR: [number, number, number] = [40 / 255, 105 / 255, 221 / 255]
 
-function PongBlob({ className, size = 256 }: { className?: string; size?: number }) {
+/** Pong Dot — circle pulse → pong game → merge → bounce & pulse (preserved as-is). */
+function PongDot({ className, size = 256 }: { className?: string; size?: number }) {
   const containerRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -241,7 +243,25 @@ function PongBlob({ className, size = 256 }: { className?: string; size?: number
     if (!el) return
     const loader = createPongLoader(el, {
       size,
-      color: PONG_ACCENT_COLOR,
+      color: DOT_ACCENT_COLOR,
+      speed: 1.0,
+    })
+    return () => loader.destroy()
+  }, [size])
+
+  return <div ref={containerRef} className={className} aria-hidden="true" />
+}
+
+/** Snake Dot — same start/end as Pong Dot; middle is classic Snake instead of Pong. */
+function SnakeDot({ className, size = 256 }: { className?: string; size?: number }) {
+  const containerRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    const loader = createSnakeLoader(el, {
+      size,
+      color: DOT_ACCENT_COLOR,
       speed: 1.0,
     })
     return () => loader.destroy()
@@ -251,7 +271,19 @@ function PongBlob({ className, size = 256 }: { className?: string; size?: number
 }
 
 function App() {
-  const [sidebarOpen, setSidebarOpen] = useState(true)
+  const [sidebarOpen, setSidebarOpen] = useState(() =>
+    typeof window !== 'undefined' && window.matchMedia('(max-width: 768px)').matches ? false : true
+  )
+  const [isMobile, setIsMobile] = useState(() =>
+    typeof window !== 'undefined' && window.matchMedia('(max-width: 768px)').matches
+  )
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const m = window.matchMedia('(max-width: 768px)')
+    const on = () => setIsMobile(m.matches)
+    m.addEventListener('change', on)
+    return () => m.removeEventListener('change', on)
+  }, [])
   const [composerOpen, setComposerOpen] = useState(false)
   const [composerPrefix, setComposerPrefix] = useState('')
   const [composerSuffix, setComposerSuffix] = useState('')
@@ -271,7 +303,7 @@ function App() {
   const [powerUpViewMode, setPowerUpViewMode] = useState<'widget' | 'panel' | 'middle'>('panel')
   const powerUpAsSidebar = powerUpViewMode === 'panel'
   const [flashcardPanelWidth, setFlashcardPanelWidth] = useState(560)
-  const [chatPanelWidth, setChatPanelWidth] = useState(400)
+  const [chatPanelWidth, setChatPanelWidth] = useState(560)
   const [powerUpWidgetLeft, setPowerUpWidgetLeft] = useState<number | null>(null)
   const [powerUpWidgetTop, setPowerUpWidgetTop] = useState<number | null>(null)
   const [powerUpWidgetWidth, setPowerUpWidgetWidth] = useState(580)
@@ -863,7 +895,7 @@ function App() {
       )}
 
       <div className="app-body">
-          {/* Sidebar - floats over content, transparent bg */}
+          {/* Sidebar - floats over content, transparent bg; on mobile collapses into hamburger + overlay */}
           <aside className={`sidebar ${sidebarOpen ? 'sidebar-open' : 'sidebar-collapsed'}`}>
             <div className="sidebar-header">
               <img src="/assets/SchoolAI.svg" alt="schoolai" className="sidebar-logo" />
@@ -915,11 +947,73 @@ function App() {
             </div>
           </aside>
 
+          {/* Mobile: hamburger + logo bar (left of logo); sidebar opens as overlay */}
+          {isMobile && (
+            <>
+              <header className="mobile-header">
+                <button
+                  type="button"
+                  className="mobile-hamburger"
+                  onClick={() => setSidebarOpen(true)}
+                  aria-label="Open menu"
+                >
+                  <img src="/assets/Menu.svg" alt="" className="mobile-hamburger-icon" />
+                </button>
+                <img src="/assets/SchoolAI.svg" alt="schoolai" className="mobile-header-logo" />
+              </header>
+              {sidebarOpen && (
+                <div
+                  className="sidebar-backdrop"
+                  role="presentation"
+                  aria-hidden
+                  onClick={() => setSidebarOpen(false)}
+                />
+              )}
+            </>
+          )}
+
           {/* Main content */}
           {view === 'test-prep-chat' ? (
             <main
               className={`main-content test-prep-layout ${(powerUpAsSidebar || powerUpViewMode === 'middle') && powerUpPanelOpen ? 'test-prep-layout--with-panel' : ''}`}
             >
+              <div className="test-prep-tab-bar-and-content">
+                {view === 'test-prep-chat' && (
+                  <div className="test-prep-flashcard-tab-bar-wrap">
+                    <div className="test-prep-flashcard-tab-bar" role="tablist" aria-label="Flashcard view">
+                      <button
+                        type="button"
+                        role="tab"
+                        aria-selected={powerUpPanelOpen && powerUpViewMode === 'widget'}
+                        className={`test-prep-flashcard-tab ${powerUpPanelOpen && powerUpViewMode === 'widget' ? 'test-prep-flashcard-tab--active' : ''}`}
+                        onClick={() => { setPowerUpViewMode('widget'); setPowerUpPanelOpen(true); }}
+                      >
+                        Widget
+                      </button>
+                      <button
+                        type="button"
+                        role="tab"
+                        aria-selected={powerUpPanelOpen && powerUpViewMode === 'panel'}
+                        className={`test-prep-flashcard-tab ${powerUpPanelOpen && powerUpViewMode === 'panel' ? 'test-prep-flashcard-tab--active' : ''}`}
+                        onClick={() => { setPowerUpViewMode('panel'); setPowerUpPanelOpen(true); }}
+                      >
+                        Panel
+                      </button>
+                      <button
+                        type="button"
+                        role="tab"
+                        aria-selected={powerUpPanelOpen && powerUpViewMode === 'middle'}
+                        className={`test-prep-flashcard-tab ${powerUpPanelOpen && powerUpViewMode === 'middle' ? 'test-prep-flashcard-tab--active' : ''}`}
+                        onClick={() => { setPowerUpViewMode('middle'); setPowerUpPanelOpen(true); }}
+                      >
+                        Middle
+                      </button>
+                    </div>
+                  </div>
+                )}
+              <div
+                className={`test-prep-tab-bar-content ${(powerUpAsSidebar || powerUpViewMode === 'middle') && powerUpPanelOpen ? 'test-prep-tab-bar-content--with-panel' : ''}`}
+              >
               {(powerUpAsSidebar || powerUpViewMode === 'middle') && powerUpPanelOpen ? (
                 <>
                   <div className="test-prep-layout-center" ref={testPrepContentRef}>
@@ -1053,15 +1147,21 @@ function App() {
                           </div>
                         </div>
                       )}
-                      {view === 'test-prep-chat' && (
-                        <div className="test-prep-flashcard-tab-bar" role="tablist" aria-label="Flashcard view">
-                          <button type="button" role="tab" aria-selected={(powerUpViewMode as 'widget' | 'panel' | 'middle') === 'widget'} className={`test-prep-flashcard-tab ${(powerUpViewMode as 'widget' | 'panel' | 'middle') === 'widget' ? 'test-prep-flashcard-tab--active' : ''}`} onClick={() => { setPowerUpViewMode('widget'); setPowerUpPanelOpen(true); }}>Widget</button>
-                          <button type="button" role="tab" aria-selected={powerUpPanelOpen && powerUpViewMode === 'panel'} className={`test-prep-flashcard-tab ${powerUpPanelOpen && powerUpViewMode === 'panel' ? 'test-prep-flashcard-tab--active' : ''}`} onClick={() => { setPowerUpViewMode('panel'); setPowerUpPanelOpen(true); }}>Panel</button>
-                          <button type="button" role="tab" aria-selected={powerUpPanelOpen && powerUpViewMode === 'middle'} className={`test-prep-flashcard-tab ${powerUpPanelOpen && powerUpViewMode === 'middle' ? 'test-prep-flashcard-tab--active' : ''}`} onClick={() => { setPowerUpViewMode('middle'); setPowerUpPanelOpen(true); }}>Middle</button>
-                        </div>
-                      )}
                     </div>
                   </div>
+                  {powerUpViewMode === 'panel' && timerWidgetOpen && timerWidgetMinimized && !timerWidgetMinimizing && (
+                    <div className="timer-minimized-circle-wrap timer-minimized-circle-wrap--in-chat">
+                      <div className="timer-minimized-circle-tooltip" role="tooltip">Study timer</div>
+                      <button type="button" className="timer-minimized-circle" onClick={handleTimerRestoreFromCircle} aria-label="Open timer">
+                        <span className="timer-minimized-circle-time">
+                          {`${String(Math.floor(timerRemainingSeconds / 60)).padStart(2, '0')}:${String(timerRemainingSeconds % 60).padStart(2, '0')}`}
+                        </span>
+                      </button>
+                      <button type="button" className="timer-minimized-circle-close" onClick={(e) => { e.stopPropagation(); setTimerWidgetOpen(false); setTimerWidgetMinimized(false); }} aria-label="Dismiss timer">
+                        <img src="/assets/Close_Small.svg" alt="" width={28} height={28} />
+                      </button>
+                    </div>
+                  )}
                   {powerUpAsSidebar && (
                     <aside className="test-prep-flashcard-sidebar test-prep-panel-full-height" aria-label="Flashcards" style={{ width: flashcardPanelWidth }}>
                       <div className="test-prep-flashcard-sidebar-resize" onMouseDown={handleFlashcardPanelResizeStart} role="separator" aria-orientation="vertical" aria-label="Resize panel" />
@@ -1145,6 +1245,19 @@ function App() {
                           <p className="composer-disclaimer test-prep-disclaimer">AI can make mistakes, please verify important details. Your data is private and never shared. Teachers or school leaders may view messages to support your learning.</p>
                         </div>
                       </div>
+                      {timerWidgetOpen && timerWidgetMinimized && !timerWidgetMinimizing && (
+                        <div className="timer-minimized-circle-wrap timer-minimized-circle-wrap--in-chat">
+                          <div className="timer-minimized-circle-tooltip" role="tooltip">Study timer</div>
+                          <button type="button" className="timer-minimized-circle" onClick={handleTimerRestoreFromCircle} aria-label="Open timer">
+                            <span className="timer-minimized-circle-time">
+                              {`${String(Math.floor(timerRemainingSeconds / 60)).padStart(2, '0')}:${String(timerRemainingSeconds % 60).padStart(2, '0')}`}
+                            </span>
+                          </button>
+                          <button type="button" className="timer-minimized-circle-close" onClick={(e) => { e.stopPropagation(); setTimerWidgetOpen(false); setTimerWidgetMinimized(false); }} aria-label="Dismiss timer">
+                            <img src="/assets/Close_Small.svg" alt="" width={28} height={28} />
+                          </button>
+                        </div>
+                      )}
                     </aside>
                   )}
                 </>
@@ -1650,37 +1763,11 @@ function App() {
                     </button>
                   </div>
                 )}
-                {view === 'test-prep-chat' && (
-                  <div className="test-prep-flashcard-tab-bar" role="tablist" aria-label="Flashcard view">
-                    <button
-                      type="button"
-                      role="tab"
-                      aria-selected={powerUpPanelOpen && powerUpViewMode === 'widget'}
-                      className={`test-prep-flashcard-tab ${powerUpPanelOpen && powerUpViewMode === 'widget' ? 'test-prep-flashcard-tab--active' : ''}`}
-                      onClick={() => { setPowerUpViewMode('widget'); setPowerUpPanelOpen(true); }}
-                    >
-                      Widget
-                    </button>
-                    <button
-                      type="button"
-                      role="tab"
-                      aria-selected={powerUpPanelOpen && powerUpViewMode === 'panel'}
-                      className={`test-prep-flashcard-tab ${powerUpPanelOpen && powerUpViewMode === 'panel' ? 'test-prep-flashcard-tab--active' : ''}`}
-                      onClick={() => { setPowerUpViewMode('panel'); setPowerUpPanelOpen(true); }}
-                    >
-                      Panel
-                    </button>
-                    <button
-                      type="button"
-                      role="tab"
-                      aria-selected={powerUpPanelOpen && powerUpViewMode === 'middle'}
-                      className={`test-prep-flashcard-tab ${powerUpPanelOpen && powerUpViewMode === 'middle' ? 'test-prep-flashcard-tab--active' : ''}`}
-                      onClick={() => { setPowerUpViewMode('middle'); setPowerUpPanelOpen(true); }}
-                    >
-                      Middle
-                    </button>
-                  </div>
+              </div>
+                  </>
                 )}
+              </div>
+              </div>
                 {timerWidgetOpen && view === 'test-prep-chat' && (!timerWidgetMinimized || timerWidgetMinimizing) && (
                   <div
                     ref={timerWidgetRef}
@@ -1788,7 +1875,7 @@ function App() {
                     <div className="timer-widget-resize-handle timer-widget-resize-s" onMouseDown={(e) => handleTimerWidgetResizeStart(e, 's')} aria-label="Resize" />
                   </div>
                 )}
-                {timerWidgetOpen && view === 'test-prep-chat' && timerWidgetMinimized && !timerWidgetMinimizing && (
+                {timerWidgetOpen && view === 'test-prep-chat' && timerWidgetMinimized && !timerWidgetMinimizing && !((powerUpViewMode === 'panel' || powerUpViewMode === 'middle') && powerUpPanelOpen) && (
                   <div
                     className="timer-minimized-circle-wrap"
                     style={{ bottom: powerUpWidgetMinimized ? 104 : 24 }}
@@ -1820,9 +1907,6 @@ function App() {
                     </button>
                   </div>
                 )}
-              </div>
-                  </>
-                )}
             </main>
           ) : (
           <main className="main-content">
@@ -1831,8 +1915,10 @@ function App() {
             {!composerOpen && (
               <>
                 <div className="content-inner">
-                  <PongBlob className="token-circle token-circle--above-greeting" size={256} />
-                  <h1 className="greeting">Hi, Annika!</h1>
+                  <div className="greeting-header">
+                    <PongDot className="token-circle token-circle--above-greeting" size={isMobile ? 180 : 256} />
+                    <h1 className="greeting">Hi, Annika!</h1>
+                  </div>
                   <p className="instruction">Pick a starting point and I'll guide you step by step.</p>
                   <div className="suggestion-buttons">
                     {suggestionButtons.slice(0, 3).map((btn) => (
@@ -2079,4 +2165,5 @@ function App() {
   )
 }
 
+export { PongDot, SnakeDot }
 export default App

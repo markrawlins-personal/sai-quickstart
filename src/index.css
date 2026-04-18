@@ -17,6 +17,16 @@
   --color-accent: #2869DD;
   --color-surface-elevated: #ffffff;
   --color-surface-default: #f5f5f5;
+  /* Shared shadow for minimized floating circles (timer + powerup) so they match */
+  --shadow-minimized-circle:
+    0 2px 4px rgba(0, 0, 0, 0.06),
+    0 4px 8px rgba(0, 0, 0, 0.06),
+    0 8px 16px rgba(0, 0, 0, 0.06),
+    0 16px 32px rgba(0, 0, 0, 0.08),
+    0 24px 48px rgba(0, 0, 0, 0.08),
+    0 32px 64px rgba(0, 0, 0, 0.08),
+    0 48px 96px rgba(0, 0, 0, 0.08),
+    0 64px 128px rgba(0, 0, 0, 0.08);
   /* User chat bubble: 6% black (equivalent solid on white ≈ #f0f0f0) */
   --color-neutral-2: rgba(0, 0, 0, 0.06);
   --color-sidebar-active: #035de20f;
@@ -40,6 +50,7 @@ html {
   padding: 0;
   height: 100%;
   min-height: 100vh;
+  -webkit-tap-highlight-color: transparent;
 }
 
 body {
@@ -48,6 +59,9 @@ body {
   height: 100%;
   width: 100%;
   overflow: hidden;
+  padding-left: env(safe-area-inset-left, 0);
+  padding-right: env(safe-area-inset-right, 0);
+  padding-bottom: env(safe-area-inset-bottom, 0);
 }
 
 #root {

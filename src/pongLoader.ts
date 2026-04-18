@@ -1,19 +1,28 @@
 /**
- * createPongLoader(container, options?)
- * Renders a liquid pong loading animation via WebGL SDF.
- * Falls back to a CSS pulsing circle if WebGL is unavailable.
+ * Pong Dot — liquid loading animation: circle pulse → splits into paddles + ball →
+ * plays pong → merges back to circle → bounce & pulse (loop).
  *
- * Options: { size?: number, color?: [r,g,b], speed?: number }
+ * createPongLoader(container, options?)
+ * Options: { size?: number, color?: [r,g,b], speed?: number, dotTextureUrl?: string | null }
  * Returns: { destroy(): void }
  */
 export function createPongLoader(
   container: HTMLElement,
-  opts: { size?: number; color?: [number, number, number]; speed?: number } = {}
+  opts: {
+    size?: number
+    color?: [number, number, number]
+    speed?: number
+    /** Image URL for the dot face; paddles stay solid `color`. Default: Non_Personified_Dot.png */
+    dotTextureUrl?: string | null
+  } = {}
 ): { destroy: () => void } {
   const size = opts.size ?? 200
   const color = opts.color ?? [0.157, 0.412, 0.867] // #2869DD
   const speed = opts.speed ?? 1.0
-  const DPR = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1
+  const dotTextureUrl: string | null =
+    opts.dotTextureUrl === undefined ? '/assets/Non_Personified_Dot.png' : opts.dotTextureUrl
+  const isMobile = typeof window !== 'undefined' && window.matchMedia('(max-width: 768px)').matches
+  const DPR = typeof window !== 'undefined' ? Math.min(window.devicePixelRatio || 1, isMobile ? 2 : 4) : 1
 
   const canvas = document.createElement('canvas')
   canvas.width = size * DPR
@@ -21,19 +30,30 @@ export function createPongLoader(
   canvas.style.width = size + 'px'
   canvas.style.height = size + 'px'
   canvas.style.borderRadius = '16px'
+  canvas.style.display = 'block'
+  canvas.style.outline = 'none'
   container.appendChild(canvas)
 
-  const gl = canvas.getContext('webgl', { alpha: true, premultipliedAlpha: false })
+  const gl = canvas.getContext('webgl', { alpha: true, premultipliedAlpha: true })
   if (!gl) return createCSSFallback(container, canvas, size, color)
   const ctx = gl
+  const hasDeriv = !!ctx.getExtension('OES_standard_derivatives')
+  const alphaCalc = hasDeriv
+    ? `float aa = max(2.0 * fwidth(d), 1.25 * px);
+  float alpha = 1.0 - smoothstep(-aa, aa, d);`
+    : `float alpha = 1.0 - smoothstep(-px * 6.0, px * 6.0, d);`
 
   const vsrc = `attribute vec2 a_pos;void main(){gl_Position=vec4(a_pos,0,1);}`
-  const fsrc = `
+  const fsrc =
+    (hasDeriv ? '#extension GL_OES_standard_derivatives : enable\n' : '') +
+    `
 precision highp float;
 uniform float u_time;
 uniform vec2 u_res;
 uniform vec3 u_color;
 uniform vec4 u_pong;
+uniform sampler2D u_dotTex;
+uniform float u_hasDotTex;
 
 #define CR 0.2
 #define PW 0.04
@@ -74,6 +94,53 @@ float easeInOut(float t) { return t<0.5 ? 2.0*t*t : 1.0-pow(-2.0*t+2.0,2.0)/2.0;
 float easeIn(float t) { return t*t*t; }
 float easeOut(float t) { return 1.0-pow(1.0-t,3.0); }
 float easeInOutQuart(float t) { return t<0.5 ? 8.0*t*t*t*t : 1.0 - pow(-2.0*t+2.0, 4.0)/2.0; }
+
+/* Ball / main circle center + radius — must stay in sync with sceneSDF for texture mapping. */
+vec4 ballParams(float phase) {
+  if (phase < T_CIRCLE) {
+    float pulseT = phase * BREATHE_OMEGA_SLOW;
+    float breathe = 1.0 + BREATHE_AMP * sin(pulseT);
+    float startScale = 1.0 + BREATHE_AMP * sin(T_CIRCLE * BREATHE_OMEGA_SLOW);
+    float easeFromLoop = smoothstep(0.0, 0.04, phase / T_CIRCLE);
+    breathe = mix(1.0, breathe, easeFromLoop);
+    float easeToSplit = smoothstep(T_CIRCLE - 0.12, T_CIRCLE, phase);
+    breathe = mix(breathe, startScale, easeToSplit);
+    return vec4(0.0, 0.0, CR * breathe, 1.0);
+  }
+  if (phase < T_SPLIT) {
+    float t = (phase - T_CIRCLE) / (T_SPLIT - T_CIRCLE);
+    float startScale = 1.0 + BREATHE_AMP * sin(T_CIRCLE * BREATHE_OMEGA_SLOW);
+    float heightT = easeInOutQuart(clamp((t - 0.04) / 0.96, 0.0, 1.0));
+    float ballShrinkT = heightT;
+    float br = mix(CR * startScale, BR, ballShrinkT);
+    return vec4(0.0, 0.0, br, 1.0);
+  }
+  if (phase < T_PONG) {
+    return vec4(u_pong.z, u_pong.w, BR, 1.0);
+  }
+  if (phase < T_MERGE) {
+    float t = (phase - T_PONG) / (T_MERGE - T_PONG);
+    float bx = mix(u_pong.z, 0.0, easeInOutQuart(clamp(t / 0.25, 0.0, 1.0)));
+    float by = mix(u_pong.w, 0.0, easeInOutQuart(clamp(t / 0.25, 0.0, 1.0)));
+    float ballGrowT = easeInOutQuart(t);
+    float br = mix(BR, CR, ballGrowT);
+    float toCircle = easeInOutQuart(clamp((t - 0.70) / 0.30, 0.0, 1.0));
+    float easeToSettle = smoothstep(0.88, 1.0, t);
+    toCircle = max(toCircle, easeToSettle);
+    float tcx = mix(bx, 0.0, toCircle);
+    float tcy = mix(by, 0.0, toCircle);
+    float tr = mix(br, CR, toCircle);
+    return vec4(tcx, tcy, tr, 1.0);
+  }
+  float lt = (phase - T_MERGE) / (DURATION - T_MERGE);
+  float bounce = 1.0 + BOUNCE_AMP * pow(2.0, -5.0 * lt) * sin(lt * 2.5 * 3.14159);
+  float pulse = 1.0 + SETTLE_AMP * sin((lt - 0.25) * BREATHE_OMEGA_SLOW / 0.75);
+  float blend = smoothstep(0.2, 0.45, lt);
+  float sc = mix(bounce, pulse, blend);
+  float easeToLoop = smoothstep(0.78, 1.0, lt);
+  sc = mix(sc, 1.0, easeToLoop);
+  return vec4(0.0, 0.0, CR * sc, 1.0);
+}
 
 float sceneSDF(vec2 p, float time) {
   float phase = mod(time, DURATION);
@@ -180,10 +247,32 @@ void main() {
   vec2 uv = (gl_FragCoord.xy / u_res - 0.5);
   float d = sceneSDF(uv, u_time);
   float px = 1.0 / u_res.y;
-  float alpha = 1.0 - smoothstep(-px * 1.5, px * 0.5, d);
-  gl_FragColor = vec4(u_color * alpha, alpha);
+  __ALPHA_CALC__
+  /* Page gray (#f5f5f5) everywhere except pong play — avoids faint accent blue on SDF edges
+     during idle pulse / morph / settle (semi-transparent fringe would otherwise read as a halo). */
+  vec3 dotBg = vec3(245.0/255.0);
+  float ph = u_time;
+  float pongPlay = smoothstep(T_SPLIT - 0.1, T_SPLIT + 0.12, ph) * (1.0 - smoothstep(T_PONG - 0.12, T_PONG + 0.1, ph));
+  vec3 baseColor = mix(dotBg, u_color, pongPlay);
+  vec3 rgb = baseColor;
+  if (u_hasDotTex > 0.5) {
+    vec4 bp = ballParams(u_time);
+    vec2 bc = bp.xy;
+    float br = bp.z;
+    vec2 q = (uv - bc) / max(br, 1e-5);
+    float rlen = length(q);
+    vec2 tuv = q * 0.5 + 0.5;
+    tuv.y = 1.0 - tuv.y;
+    vec4 tex = texture2D(u_dotTex, tuv);
+    vec3 texColor = mix(dotBg, tex.rgb, tex.a);
+    float edgeW = px * 3.0 / max(br, 1e-5);
+    float inDisc = 1.0 - smoothstep(1.0 - edgeW, 1.0 + edgeW, rlen);
+    rgb = mix(baseColor, texColor, inDisc);
+  }
+  /* Premultiplied rgb + ONE/ONE_MINUS_SRC_ALPHA matches canvas premultipliedAlpha. */
+  gl_FragColor = vec4(rgb * alpha, alpha);
 }
-`
+`.replace('__ALPHA_CALC__', alphaCalc)
 
   function compileShader(type: number, src: string): WebGLShader | null {
     const s = ctx.createShader(type)
@@ -219,12 +308,53 @@ void main() {
   const uRes = ctx.getUniformLocation(prog, 'u_res')
   const uColor = ctx.getUniformLocation(prog, 'u_color')
   const uPong = ctx.getUniformLocation(prog, 'u_pong')
+  const uDotTex = ctx.getUniformLocation(prog, 'u_dotTex')
+  const uHasDotTex = ctx.getUniformLocation(prog, 'u_hasDotTex')
+
+  let destroyed = false
+  const dotTex = ctx.createTexture()
+  let dotTexReady = false
+
+  function loadDotTexture(url: string | null) {
+    if (!url) return
+    const img = new Image()
+    img.crossOrigin = 'anonymous'
+    img.onload = () => {
+      if (destroyed) return
+      ctx.bindTexture(ctx.TEXTURE_2D, dotTex)
+      ctx.pixelStorei(ctx.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false)
+      try {
+        ctx.texImage2D(ctx.TEXTURE_2D, 0, ctx.RGBA, ctx.RGBA, ctx.UNSIGNED_BYTE, img)
+      } catch {
+        const c = document.createElement('canvas')
+        const w = img.naturalWidth || 52
+        const h = img.naturalHeight || 52
+        c.width = w
+        c.height = h
+        const c2d = c.getContext('2d')
+        if (c2d) {
+          c2d.drawImage(img, 0, 0)
+          ctx.texImage2D(ctx.TEXTURE_2D, 0, ctx.RGBA, ctx.RGBA, ctx.UNSIGNED_BYTE, c)
+        }
+      }
+      ctx.texParameteri(ctx.TEXTURE_2D, ctx.TEXTURE_WRAP_S, ctx.CLAMP_TO_EDGE)
+      ctx.texParameteri(ctx.TEXTURE_2D, ctx.TEXTURE_WRAP_T, ctx.CLAMP_TO_EDGE)
+      ctx.texParameteri(ctx.TEXTURE_2D, ctx.TEXTURE_MIN_FILTER, ctx.LINEAR)
+      ctx.texParameteri(ctx.TEXTURE_2D, ctx.TEXTURE_MAG_FILTER, ctx.LINEAR)
+      dotTexReady = true
+    }
+    img.onerror = () => {
+      dotTexReady = false
+    }
+    img.src = url
+  }
+  loadDotTexture(dotTextureUrl)
 
   ctx.uniform2f(uRes, size * DPR, size * DPR)
   ctx.uniform3f(uColor, color[0], color[1], color[2])
   ctx.viewport(0, 0, size * DPR, size * DPR)
   ctx.enable(ctx.BLEND)
-  ctx.blendFunc(ctx.SRC_ALPHA, ctx.ONE_MINUS_SRC_ALPHA)
+  ctx.blendFunc(ctx.ONE, ctx.ONE_MINUS_SRC_ALPHA)
   ctx.clearColor(0, 0, 0, 0)
 
   const AW = 0.42
@@ -340,7 +470,6 @@ void main() {
 
   let startTime: number | null = null
   let rafId: number | null = null
-  let destroyed = false
 
   function animate(timestamp: number) {
     if (destroyed) return
@@ -366,6 +495,10 @@ void main() {
     ctx.clear(ctx.COLOR_BUFFER_BIT)
     ctx.uniform1f(uTime, phase)
     ctx.uniform4f(uPong, frozenPong[0], frozenPong[1], frozenPong[2], frozenPong[3])
+    ctx.activeTexture(ctx.TEXTURE0)
+    ctx.bindTexture(ctx.TEXTURE_2D, dotTex)
+    if (uDotTex) ctx.uniform1i(uDotTex, 0)
+    if (uHasDotTex) ctx.uniform1f(uHasDotTex, dotTexReady ? 1 : 0)
     ctx.drawArrays(ctx.TRIANGLE_STRIP, 0, 4)
 
     rafId = requestAnimationFrame(animate)
@@ -381,10 +514,14 @@ void main() {
       ctx.deleteShader(vs)
       ctx.deleteShader(fs)
       ctx.deleteBuffer(buf)
+      ctx.deleteTexture(dotTex)
       canvas.remove()
     },
   }
 }
+
+/** Alias: use this name when you want the "Pong Dot" animation explicitly. */
+export { createPongLoader as createPongDotLoader }
 
 function createCSSFallback(
   container: HTMLElement,
