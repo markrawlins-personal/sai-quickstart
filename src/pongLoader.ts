@@ -120,10 +120,11 @@ vec4 ballParams(float phase) {
   }
   if (phase < T_MERGE) {
     float t = (phase - T_PONG) / (T_MERGE - T_PONG);
+    /* Match sceneSDF merge heightT so texture/dotBg scale with the morphing blob. */
+    float heightT = easeInOutQuart(clamp(t / 0.88, 0.0, 1.0));
     float bx = mix(u_pong.z, 0.0, easeInOutQuart(clamp(t / 0.25, 0.0, 1.0)));
     float by = mix(u_pong.w, 0.0, easeInOutQuart(clamp(t / 0.25, 0.0, 1.0)));
-    float ballGrowT = easeInOutQuart(t);
-    float br = mix(BR, CR, ballGrowT);
+    float br = mix(BR, CR, heightT);
     float toCircle = easeInOutQuart(clamp((t - 0.70) / 0.30, 0.0, 1.0));
     float easeToSettle = smoothstep(0.88, 1.0, t);
     toCircle = max(toCircle, easeToSettle);
@@ -217,8 +218,7 @@ float sceneSDF(vec2 p, float time) {
 
     float bx = mix(u_pong.z, 0.0, easeInOutQuart(clamp(t / 0.25, 0.0, 1.0)));
     float by = mix(u_pong.w, 0.0, easeInOutQuart(clamp(t / 0.25, 0.0, 1.0)));
-    float ballGrowT = easeInOutQuart(t);
-    float br = mix(BR, CR, ballGrowT);
+    float br = mix(BR, CR, heightT);
     float db = sdCircle(p - vec2(bx, by), br);
     d = opSmoothUnion(d, db, K_PONG);
     float circleOnly = sdCircle(p, CR);
