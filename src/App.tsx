@@ -1,4 +1,4 @@
-import { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback } from 'react'
+import { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback, useId } from 'react'
 import { motion } from 'motion/react'
 import { createPongLoader } from './pongLoader'
 import { createSnakeLoader } from './snakeLoader'
@@ -117,6 +117,16 @@ function TokenBlob({
   size?: number
   mode?: 'idle' | 'thinking'
 }) {
+  const clipPathId = useId().replace(/:/g, '')
+  const initialBlobD = useMemo(() => {
+    const radii = expandBlobRadii(Array(BLOB_CTRL).fill(BLOB_BASE_R))
+    const pts: [number, number][] = radii.map((r, i) => {
+      const a = (i / BLOB_N) * Math.PI * 2
+      return [BLOB_CX + r * Math.cos(a), BLOB_CY + r * Math.sin(a)]
+    })
+    return blobToPath(pts)
+  }, [])
+
   const pathRef = useRef<SVGPathElement>(null)
   const circleRefs = useRef<(SVGCircleElement | null)[]>([])
   const idleOsc = useMemo(() => makeBlobOscillators(2.5), [])
@@ -216,6 +226,21 @@ function TokenBlob({
       overflow="visible"
       aria-hidden="true"
     >
+      <defs>
+        <clipPath id={clipPathId}>
+          <path ref={pathRef} d={initialBlobD} fill="#fff" />
+        </clipPath>
+      </defs>
+      <g clipPath={`url(#${clipPathId})`}>
+        <image
+          href="/assets/Non_Personified_Dot.svg"
+          x={-20}
+          y={-20}
+          width={140}
+          height={140}
+          preserveAspectRatio="xMidYMid slice"
+        />
+      </g>
       <g>
         {Array.from({ length: BLOB_MAX_DROPS }, (_, i) => (
           <circle
@@ -226,7 +251,6 @@ function TokenBlob({
           />
         ))}
       </g>
-      <path ref={pathRef} fill="var(--color-accent)" />
     </svg>
   )
 }
